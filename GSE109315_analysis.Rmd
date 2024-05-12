@@ -1,0 +1,79 @@
+---
+title: "GSE109315_analysis"
+author: "artemii"
+date: "2024-05-07"
+output: html_document
+---
+## Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Loading libraries and data
+```{r}
+
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+library(BiocManager)
+
+packages <- c("GEOquery", "edgeR", "limma", "ggVennDiagram", "tidyverse", "rWikiPathways", "pacman", "heatmap3", "openxlsx", "RColorBrewer", "ReactomePA", "ggrepel", "DOSE",
+  "GO.db",
+  "GSEABase",
+  "org.Hs.eg.db",
+  "clusterProfiler",
+  "dplyr",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "RColorBrewer",
+  "rWikiPathways",
+  "RCy3", "pacman")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    BiocManager::install(pkg)
+  }
+}
+
+library(pacman)
+load.libs <- c("GEOquery", "edgeR", "limma", "ggVennDiagram", "tidyverse", "rWikiPathways", "pacman", "heatmap3", "openxlsx", "RColorBrewer", "ReactomePA", "ggrepel",
+  "DOSE",
+  "GO.db",
+  "GSEABase",
+  "org.Hs.eg.db",
+  "clusterProfiler",
+  "dplyr",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "RColorBrewer",
+  "rWikiPathways",
+  "RCy3")
+p_load(load.libs, character.only = TRUE)
+
+```
+
+### Root directory
+
+```{r setup, include = FALSE}
+ROOT_DIR="/Users/artemii/obrain_lab/projects/dreadd_obesity/data"
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = ROOT_DIR)
+```
+
+## Read data from GEO
+
+```{r}
+
+gse <- getGEO("GSE109315")
+
+# Extract the expression data from the dataset
+expression_data <- exprs(gse[[1]])
+
+# Check the dimensions of the expression data
+dim(expression_data)
+```
+
+

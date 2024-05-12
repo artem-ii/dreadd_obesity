@@ -1,0 +1,1561 @@
+---
+title: "Liver Myofibroblasts Reprogramming"
+subtitle: RNA-seq analysis
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Loading libraries and data
+```{r}
+library(edgeR)
+library(limma)
+library(ggVennDiagram)
+library(tidyverse)
+library(rWikiPathways)
+library(pacman)
+library(heatmap3)
+library(openxlsx)
+library(RColorBrewer)
+library(ReactomePA)
+library(ggrepel)
+load.libs <- c(
+  "DOSE",
+  "GO.db",
+  "GSEABase",
+  "org.Hs.eg.db",
+  "clusterProfiler",
+  "dplyr",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "RColorBrewer",
+  "rWikiPathways",
+  "RCy3")
+p_load(load.libs, character.only = TRUE)
+#cytoscapePing()
+
+
+# Load everything. no need to re-compute
+# load("/Users/artemii/Documents/sasha-rna-seq-analysis/environments/env-08-august-2022.RData")
+
+load("/Users/artemii/Library/Mobile Documents/com~apple~CloudDocs/Documents/sasha_projects/phd/sasha-rna-seq-analysis/environments/env-08-august-2022.RData")
+
+```
+
+
+```{r setup, include = FALSE}
+# ROOT_DIR="/Users/artemii/Documents/sasha-rna-seq-analysis/"
+ROOT_DIR="/Users/artemii/Library/Mobile Documents/com~apple~CloudDocs/Documents/sasha_projects/phd/sasha-rna-seq-analysis"
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = ROOT_DIR)
+```
+
+## Load sample info
+
+```{r}
+# load("/Users/artemii/Library/Mobile Documents/com~apple~CloudDocs/Documents/sasha_projects/phd/sasha-rna-seq-analysis/old-version-analysis/robjects/env.RData")
+
+
+
+targets <- read.delim(file = "config-files/targets.txt")
+
+targets$Group <- as.factor(targets$Group)
+
+```
+
+## Filter reads with low counts
+Turn this off for profibrotic factor gene set tests
+```{r}
+keep <- rowSums(cpm(eset) > 0) >= 4
+eset <- eset[keep,]
+eset$samples$lib.size <- colSums(eset$counts)
+dim(eset)
+```
+
+## Exploratory analysis
+### MDS Plot
+```{r}
+svg("plots/mds_plot_points.svg")
+plotMDS(eset[,c(1, 2, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15)], pch = 19, cex = 3)
+
+
+```
+
+## A model with no blocking
+### Design and contrast matrices
+```{r}
+# Design matrix for a linear model
+design <- model.matrix(~ 0 + targets$Group)
+colnames(design) <- as.character(levels(targets$Group))
+
+# Contrast matrix for a linear model
+contrast.matrix <- makeContrasts(BICRA-Control,
+                                 CCAR-Control,
+                                 CHCHD10-Control,
+                                 CNOT-Control,
+                                 siSDCBP-siScrambled,
+                                 levels = levels(targets$Group))
+colnames(contrast.matrix) <- c("BICRA", "CCAR", "CHCHD10", "CNOT", "siSDCBP")
+
+```
+
+### Fit a linear model
+```{r}
+# Estimating dispersions
+eset.disp <- estimateDisp(eset, design)
+fit <- glmQLFit(eset.disp, design)
+```
+
+ ### Generate DE gene tables
+I released p value (1) and logFC (0) thresholds for profibrotic genes
+```{r}
+# Quasilikelihood tests
+qlf.BICRA <- glmQLFTest(fit, contrast = contrast.matrix[, "BICRA"])
+qlf.CCAR <- glmQLFTest(fit, contrast = contrast.matrix[, "CCAR"])
+qlf.CHCHD10 <- glmQLFTest(fit, contrast = contrast.matrix[, "CHCHD10"])
+qlf.CNOT <- glmQLFTest(fit, contrast = contrast.matrix[, "CNOT"])
+qlf.siSDCBP <- glmQLFTest(fit, contrast = contrast.matrix[, "siSDCBP"])
+
+
+# Filtering parameters
+pvalue.threshold <- 1
+logFC.threshold <- 0
+
+# Filtering top genes
+qlf.BICRA.top <- as.data.frame(topTags(qlf.BICRA, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.BICRA.top <- qlf.BICRA.top[abs(qlf.BICRA.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CCAR.top <- as.data.frame(topTags(qlf.CCAR, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CCAR.top <- qlf.CCAR.top[abs(qlf.CCAR.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CHCHD10.top <- as.data.frame(topTags(qlf.CHCHD10, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CHCHD10.top <- qlf.CHCHD10.top[abs(qlf.CHCHD10.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CNOT.top <- as.data.frame(topTags(qlf.CNOT, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CNOT.top <- qlf.CNOT.top[abs(qlf.CNOT.top$logFC) >= logFC.threshold, ]
+
+
+qlf.siSDCBP.top <- as.data.frame(topTags(qlf.siSDCBP, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.siSDCBP.top <- qlf.siSDCBP.top[abs(qlf.siSDCBP.top$logFC) >= logFC.threshold, ]
+```
+
+### All genes tables to files
+```{}
+keep_columns <- grepl(x = colnames(cpm(eset)), pattern = 'BICRA|Control')
+qlf.BICRA.table <- merge(x=qlf.BICRA.top,y=cpm(eset,log = T)[,keep_columns],by=0)
+qlf.BICRA.table <- qlf.BICRA.table[order(qlf.BICRA.table$PValue),]
+write.xlsx(qlf.BICRA.table,"processed-data/BICRAvsControl-all-genes.xlsx")
+
+keep_columns <- grepl(x = colnames(cpm(eset)), pattern = 'CNOT|Control')
+qlf.CNOT.table <- merge(x=qlf.CNOT.top,y=cpm(eset,log = T)[,keep_columns],by=0)
+qlf.CNOT.table <- qlf.CNOT.table[order(qlf.CNOT.table$PValue),]
+write.xlsx(qlf.CNOT.table,"processed-data/CNOTvsControl-all-genes.xlsx")
+
+keep_columns <- grepl(x = colnames(cpm(eset)), pattern = 'CCAR|Control')
+qlf.CCAR.table = merge(x=qlf.CCAR.top,y=cpm(eset,log = T)[,keep_columns],by=0)
+qlf.CCAR.table = qlf.CCAR.table[order(qlf.CCAR.table$PValue),]
+write.xlsx(qlf.CCAR.table,"processed-data/CCARvsControl-all-genes.xlsx")
+
+keep_columns <- grepl(x = colnames(cpm(eset)), pattern = 'CHCHD10|Control')
+qlf.CHCHD10.table = merge(x=qlf.CHCHD10.top,y=cpm(eset,log = T)[,keep_columns],by=0)
+qlf.CHCHD10.table = qlf.CHCHD10.table[order(qlf.CHCHD10.table$PValue),]
+write.xlsx(qlf.CHCHD10.table,"processed-data/CHCHD10vsControl-all-genes.xlsx")
+
+keep_columns <- grepl(x = colnames(cpm(eset)), pattern = 'siSDCBP|siScrambled')
+qlf.siSDCBP.table = merge(x=qlf.siSDCBP.top,y=cpm(eset,log = T)[,keep_columns],by=0)
+qlf.siSDCBP.table = qlf.siSDCBP.table[order(qlf.siSDCBP.table$PValue),]
+write.xlsx(qlf.siSDCBP.table,"processed-data/siSDCBPvssiScrambled-all-genes.xlsx")
+```
+
+
+
+### DE genes tables to files
+```{}
+
+qlf.BICRA.table = merge(x=qlf.BICRA.top,y=cpm(eset,log = T),by=0)
+qlf.BICRA.table = qlf.BICRA.table[order(qlf.BICRA.table$PValue),]
+write.xlsx(qlf.BICRA.table,"processed-data/BICRAvsControl-DE-genes.xlsx")
+
+qlf.CNOT.table = merge(x=qlf.CNOT.top,y=cpm(eset,log = T),by=0)
+qlf.CNOT.table = qlf.CNOT.table[order(qlf.CNOT.table$PValue),]
+write.xlsx(qlf.CNOT.table,"processed-data/CNOTvsControl-DE-genes.xlsx")
+
+qlf.CCAR.table = merge(x=qlf.CCAR.top,y=cpm(eset,log = T),by=0)
+qlf.CCAR.table = qlf.CCAR.table[order(qlf.CCAR.table$PValue),]
+write.xlsx(qlf.CCAR.table,"processed-data/CCARvsControl-DE-genes.xlsx")
+
+qlf.CHCHD10.table = merge(x=qlf.CHCHD10.top,y=cpm(eset,log = T),by=0)
+qlf.CHCHD10.table = qlf.CHCHD10.table[order(qlf.CHCHD10.table$PValue),]
+write.xlsx(qlf.CHCHD10.table,"processed-data/CHCHD10vsControl-DE-genes.xlsx")
+
+qlf.siSDCBP.table = merge(x=qlf.siSDCBP.top,y=cpm(eset,log = T),by=0)
+qlf.siSDCBP.table = qlf.siSDCBP.table[order(qlf.siSDCBP.table$PValue),]
+write.xlsx(qlf.siSDCBP.table,"processed-data/siSDCBPvssiScrambled-DE-genes.xlsx")
+ ```
+
+## A model with experiment blocking
+## ! TODO How to do blocking in edgeR?
+### Design and contrast matrices
+```{}
+# Design matrix for a linear model
+Experiment <- as.factor(targets$Experiment)
+Group <- as.factor(targets$Group)
+design <- model.matrix(~ Experiment + Group)
+colnames(design) <- gsub(pattern = "Group|Experiment",
+                         replacement = "",
+                         x = colnames(design)
+                         )
+
+# Contrast matrix for a linear model
+contrast.matrix <- makeContrasts(BICRA-Control,
+                                 CCAR-Control,
+                                 CHCHD10-Control,
+                                 CNOT-Control,
+                                 siSDCBP-siScrambled,
+                                 levels = levels(targets$Group))
+colnames(contrast.matrix) <- c("BICRA", "CCAR", "CHCHD10", "CNOT", "siSDCBP")
+colnames(design)
+```
+
+### Fit a linear model
+```{}
+# Estimating dispersions
+eset.disp <- estimateDisp(eset, design)
+fit <- glmQLFit(eset.disp, design)
+```
+
+### Generate DE gene tables
+```{r}
+# Quasilikelihood tests
+qlf.BICRA <- glmQLFTest(fit, contrast = contrast.matrix[, "BICRA"])
+qlf.CCAR <- glmQLFTest(fit, contrast = contrast.matrix[, "CCAR"])
+qlf.CHCHD10 <- glmQLFTest(fit, contrast = contrast.matrix[, "CHCHD10"])
+qlf.CNOT <- glmQLFTest(fit, contrast = contrast.matrix[, "CNOT"])
+qlf.siSDCBP <- glmQLFTest(fit, contrast = contrast.matrix[, "siSDCBP"])
+
+
+# Filtering parameters
+pvalue.threshold <- 0.05
+logFC.threshold <- 1
+
+# Filtering top genes
+qlf.BICRA.top <- as.data.frame(topTags(qlf.BICRA, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.BICRA.top <- qlf.BICRA.top[abs(qlf.BICRA.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CCAR.top <- as.data.frame(topTags(qlf.CCAR, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CCAR.top <- qlf.CCAR.top[abs(qlf.CCAR.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CHCHD10.top <- as.data.frame(topTags(qlf.CHCHD10, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CHCHD10.top <- qlf.CHCHD10.top[abs(qlf.CHCHD10.top$logFC) >= logFC.threshold, ]
+
+
+qlf.CNOT.top <- as.data.frame(topTags(qlf.CNOT, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.CNOT.top <- qlf.CNOT.top[abs(qlf.CNOT.top$logFC) >= logFC.threshold, ]
+
+
+qlf.siSDCBP.top <- as.data.frame(topTags(qlf.siSDCBP, sort.by = "PValue",
+                                       n = length(rownames(eset)),
+                                       adjust.method = "BH",
+                                       p.value = pvalue.threshold
+                                       )
+                               )
+qlf.siSDCBP.top <- qlf.siSDCBP.top[abs(qlf.siSDCBP.top$logFC) >= logFC.threshold, ]
+```
+
+## Picking colors
+
+```{r}
+
+
+brewer.pal.info
+```
+```{r}
+display.brewer.pal(n = 11, name = "RdYlBu")
+```
+
+```{r}
+col.pal.set <- brewer.pal(8,"RdYlBu")
+```
+
+
+## Heatmaps for top DE genes
+
+### BICRA
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.BICRA.top
+GENE="BICRA"
+i=1
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$PValue<0.05], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL == keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+# p <- heatmap3(x,
+#               margins = c(5, 20),
+#               cexRow = 0.1,
+#               cexCol = 0.9)
+```
+
+#### Profibrotic genes
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.BICRA.top
+
+
+profibrotic <- c("TIMP1", "TIMP2", "DES", "ACTA2", "LOX", "COL1A1", "COL1A2", "S100A6", "LOXL2", "PDGFRB", "TGFBR1", "NR1D2", "SPP1", "IL17RA")
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+plots <- list()
+heatmap3(x,
+         margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9)
+
+title(paste("Profibrotic genes in ", GENE), outer = T, line = -0.9)
+
+x_BICRA <- x
+
+plots[[i]] <- recordPlot()
+```
+
+
+
+#### Stats for profibrotic genes
+To get some of these genes, I had to turn off my logCPM filter as they had low counts.
+For some reason, TIMP1 has 0 counts in all samples.
+
+```{r}
+gene.table <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic],c("SYMBOL", "logFC", "PValue", "logCPM")]
+
+gene.table
+```
+Save table to excel
+```{r}
+write.xlsx(gene.table, paste("processed-data/profibrotic_", GENE, ".xlsx", sep = ""))
+```
+
+### CHCHD10
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.CHCHD10.top
+GENE="CHCHD10"
+i=2
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$PValue<0.05], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL == keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+#p <- heatmap3(x,
+#              margins = c(5, 20),
+#              cexRow = 0.1,
+#              cexCol = 0.9)
+```
+
+#### Profibrotic genes
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.CHCHD10.top
+
+
+profibrotic <- c("TIMP1", "TIMP2", "DES", "ACTA2", "LOX", "COL1A1", "COL1A2", "S100A6", "LOXL2", "PDGFRB", "TGFBR1", "NR1D2", "SPP1", "IL17RA")
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_samples <- keep_samples[c(4:6, 1:3)]
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+heatmap3(x,
+         margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9,
+         Colv = NA)
+
+title(paste("Profibrotic genes in ", GENE), outer = T, line = -0.9)
+
+x_CHCHD10 <- x[,c(4, 5, 6)]
+plots[[i]] <- recordPlot()
+```
+
+
+#### Stats for profibrotic genes
+
+```{r}
+gene.table <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic],c("SYMBOL", "logFC", "PValue", "logCPM")]
+
+gene.table
+```
+Save table to excel
+```{r}
+write.xlsx(gene.table, paste("processed-data/profibrotic_", GENE, ".xlsx", sep = ""))
+```
+
+### siSDCBP
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.siSDCBP.top
+GENE="SiSDCBP"
+i=3
+
+sample_expression <-  paste("siScrambled|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$PValue<0.05], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL == keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+# p <- heatmap3(x,
+#               margins = c(5, 20),
+#               cexRow = 0.1,
+#               cexCol = 0.9)
+```
+
+#### Profibrotic genes
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.siSDCBP.top
+GENE="siSDCBP"
+
+profibrotic <- c("TIMP1", "TIMP2", "DES", "ACTA2", "LOX", "COL1A1", "COL1A2", "S100A6", "LOXL2", "PDGFRB", "TGFBR1", "NR1D2", "SPP1", "IL17RA")
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+heatmap3(x,
+         margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9)
+
+title(paste("Profibrotic genes in ", GENE), outer = T, line = -0.9)
+
+plots[[i]] <- recordPlot()
+```
+
+
+#### Stats for profibrotic genes
+
+```{r}
+gene.table <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic],c("SYMBOL", "logFC", "PValue", "logCPM")]
+
+gene.table
+```
+### CNOT
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.CNOT.top
+GENE="CNOT"
+i=4
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$PValue<0.05], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL == keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+#p <- heatmap3(x,
+#              margins = c(5, 20),
+#              cexRow = 0.1,
+#              cexCol = 0.9)
+```
+
+
+#### Profibrotic genes
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.CNOT.top
+
+
+profibrotic <- c("TIMP1", "TIMP2", "DES", "ACTA2", "LOX", "COL1A1", "COL1A2", "S100A6", "LOXL2", "PDGFRB", "TGFBR1", "NR1D2", "SPP1", "IL17RA")
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))[c(4:6, 1:3)]
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+ 
+heatmap3(x,
+         margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9,
+         Colv = NA)
+
+title(paste("Profibrotic genes in ", GENE), outer = T, line = -0.9)
+
+x_CNOT <- x[,c(4, 5, 6)]
+
+plots[[i]] <- recordPlot()
+```
+
+#### Stats for profibrotic genes
+
+```{r}
+gene.table <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic],c("SYMBOL", "logFC", "PValue", "logCPM")]
+
+gene.table
+```
+
+
+Save table to excel
+```{r}
+write.xlsx(gene.table, paste("processed-data/profibrotic_", GENE, ".xlsx", sep = ""))
+```
+
+#### ECM genes
+(extracellular matrix)
+
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.CNOT.top
+
+i <- 5
+
+extracellular <- c("EFEMP1", "HTRA1", "TIMP2", "CRTAP", "CTSK", "COL1A1", "COL3A1", "COL4A5", "COL5A2", "COL5A3", "COL8A1", "COL14A1", "DCN", "FBLN1", "GDF5", "ITGA10", "ITGAE", "LAMA4", "LUM", "LOXL1", "MFAP2", "MFAP4", "MFAP5", "NID1", "PECAM1", "P3H2", "P4HA3", "SPARC", "SCUBE3", "SDC2", "TNXB", "TGFB2")
+
+sample_expression <-  paste("Control|", GENE, sep = "")
+keep_samples <- grep(sample_expression, colnames(eset))[c(4:6, 1:3)]
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% extracellular], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+heatmap3(x,
+         margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9,
+         Colv = NA)
+
+title(paste("Extracellular matrix genes in ", GENE), outer = T, line = -0.9)
+
+
+plots[[i]] <- recordPlot()
+```
+#### Stats for ECM genes
+```{r}
+gene.table <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% extracellular],c("SYMBOL", "logFC", "PValue", "logCPM")]
+
+gene.table
+```
+
+
+Save table to excel
+```{r}
+write.xlsx(gene.table, paste("processed-data/ecm_", GENE, ".xlsx", sep = ""))
+```
+
+#### Full profibrotic heatmap
+```{r fig.height=5, fig.width=5}
+DE_OBJECTS=list(qlf.BICRA.top, qlf.CHCHD10.top, qlf.CNOT.top)
+GENES=c("BICRA", "CHCHD10", "CNOT")
+
+
+profibrotic <- c("TIMP1", "TIMP2", "ACTA2", "COL1A1", "COL1A2", "TGFBR1", "NR1D2", "SPP1")
+
+sample_expression <-  paste("Control", "BICRA", "CHCHD10", "CNOT",  sep = "|")
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% profibrotic], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+x <- x[, c(10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9)]
+plots <- list()
+svg("plots/profibrotic_heatmap.svg")
+heatmap3(x,
+         #margins = c(5, 20),
+         cexRow = 1,
+         cexCol = 0.9,
+         Colv = NA)
+
+ggsave("profibrotic_heatmap.svg", p[1])
+#title(paste("Profibrotic genes in ", GENE), outer = T, line = -0.9)
+
+#x_BICRA <- x
+
+#plots[[i]] <- recordPlot()
+```
+
+## Save plots
+Save all heatmaps for profibrotic and additional genes plots to pdf
+```{r}
+pdf(paste("processed-data/profibrotic_ecm_all_genes", ".pdf", sep = ""),
+    paper = "a4r",
+    width = 11.49,
+    height = 8.07)
+for (i in 1:length(plots)){
+  replayPlot(plots[[i]])
+}
+dev.off()
+```
+
+
+## Save plots 2
+Version with profibrotic and additional genes for CNOT
+Save all heatmaps for profibrotic and additional genes plots to pdf
+```{r}
+pdf(paste("processed-data/profibrotic_ecm_", GENE, ".pdf", sep = ""),
+    paper = "a4r",
+    width = 11.49,
+    height = 8.07)
+for (i in 1:length(plots)){
+  replayPlot(plots[[i]])
+}
+dev.off()
+```
+
+## Heatmap common DE genes BICRA, CHCHD10
+26 genes which are regulated the same way between BICRA and CHCHD10
+```{r fig.height=5, fig.width=5}
+DE_OBJECT=qlf.BICRA.top
+
+
+common_genes <- c("LGALS9", "TYMP", "XAF1", "ISG20", "BST2", "IFI35", "SAMD9L", "IFIH1", "GMPR", "USP41", "GRIP2", "RET", "BTC", "IL4I1", "OAS1", "USP18", "MX1", "ETV7", "AC004551.1", "SLC15A3", "RTP4", "MX2", "BATF2", "CMPK2", "RSAD2", "NRIR")
+
+sample_expression <-  "Control|BICRA|CHCHD10"
+keep_samples <- grep(sample_expression, colnames(eset))
+keep_samples <- keep_samples[c(7:9, 1:6)]
+keep_genes <- DE_OBJECT[rownames(DE_OBJECT)[DE_OBJECT$SYMBOL %in% common_genes], "SYMBOL"]
+
+x <- cpm(eset, log = T)
+x <- x[row.names(DE_OBJECT)[DE_OBJECT$SYMBOL %in% keep_genes], keep_samples]
+row.names(x) <- keep_genes
+
+plots <- list()
+heatmap3(x,
+         Colv = NA,
+         margins = c(5, 15),
+         cexRow = 0.6,
+         cexCol = 0.6)
+
+title(paste("Common DE genes in BICRA and CHCHD10"), outer = T, line = -4)
+
+
+plots[[i]] <- recordPlot()
+```
+
+Save all common genes plots to pdf
+```{r}
+pdf(paste("processed-data/common_", "BICRA_CHCHD10", ".pdf", sep = ""),
+    paper = "a4r",
+    width = 11.49,
+    height = 8.07)
+for (i in 1:length(plots)){
+  replayPlot(plots[[i]])
+}
+dev.off()
+```
+
+A table with statistics for genes commonly deregulated in BICRA and CHCHD10
+```{r}
+
+
+```
+
+
+## Venn Diagram
+```{r}
+# Now I will find overlaps in DE genes and plot a Venn diagram
+
+# DE.gene.symbols <- list("BICRA" = qlf.BICRA.top$SYMBOL,
+#                         "CCAR" = qlf.CCAR.top$SYMBOL,
+#                         "CHCHD10" = qlf.CHCHD10.top$SYMBOL,
+#                         "CNOT" = qlf.CNOT.top$SYMBOL,
+#                         "siSDCBP" = qlf.siSDCBP.top$SYMBOL)
+
+DE.gene.symbols <- list("BICRA" = qlf.BICRA.top$SYMBOL,
+                        "CHCHD10" = qlf.CHCHD10.top$SYMBOL,
+                        "CNOT" = qlf.CNOT.top$SYMBOL)
+
+p <- ggVennDiagram(DE.gene.symbols,
+                   category.names = names(DE.gene.symbols),
+                   edge_lty = "blank")
+
+ggsave("venn_diagram.svg", p)
+
+p
+```
+
+## Volcano plots
+```{r}
+plot_volcano <- function(exp_data, top_label = 5,
+                         lim_logFC = F,
+                         lim_FDR = F,
+                         logfc_fdr_thresholds_for_labels = F) {
+
+  exp_data <- exp_data %>%
+    mutate(
+      Significance = case_when(
+        abs(logFC) >= log(2, base = 2) & FDR <= 0.05 ~ "FDR_0_05",
+        TRUE ~ "UNCHANGED"
+      )
+    )
+  
+  exp_data <- exp_data %>%
+    mutate(
+      Expression = case_when(logFC >= log(2, base = 2) & FDR <= 0.05 ~ "Up-regulated",
+                             logFC <= -log(2, base = 2) & FDR <= 0.05 ~ "Down-regulated",
+                             TRUE ~ "Unchanged")
+    )
+  if (logfc_fdr_thresholds_for_labels) {
+    logfc_threshold = logfc_fdr_thresholds_for_labels[1]
+    fdr_threshold = logfc_fdr_thresholds_for_labels[2]
+    exp_data <- exp_data %>%
+      mutate(
+        Expression = case_when(logFC >= logfc_threshold & FDR <= fdr_threshold ~ "Up-regulated",
+                               logFC <= logfc_threshold & FDR <= fdr_threshold ~ "Down-regulated",
+                               TRUE ~ "Unchanged")
+      )
+    }
+    
+  top <-  top_label
+  top_genes <- bind_rows(
+    exp_data %>%
+      filter(Expression == 'Up-regulated') %>%
+      arrange(FDR, desc(abs(logFC))) %>%
+      head(top),
+    exp_data %>%
+      filter(Expression == 'Down-regulated') %>%
+      arrange(FDR, desc(abs(logFC))) %>%
+      head(top)
+  )
+  print(top_genes)
+  
+  lim_up_x <- max(top_genes$logFC) * 1.2
+  lim_dn_x <- min(top_genes$logFC) * 1.2
+  lim_up_y <- -log(min(top_genes$FDR), 10) * 1.2
+  
+  lim_x <- max(c(abs(lim_up_x), abs(lim_dn_x)))
+
+   ggplot(exp_data, aes(x = logFC, y = -log(FDR, 10))) +
+     geom_point(aes(color = Significance), size = 1.2) +
+     scale_color_manual(values = c(UNCHANGED = "black",
+                                  FDR_0_05 =  "red")) +
+     geom_label_repel(data = top_genes,
+                      aes(logFC, -log(FDR, 10), label = SYMBOL),
+                      size = 4,
+                      max.overlaps = 20) +
+     scale_x_continuous(expand = c(0, 0), limits = c(-lim_x, lim_x)) +
+     scale_y_continuous(expand = c(0, 0), limits = c(0, lim_up_y)) +
+     theme_classic() +
+     theme(legend.position = "none")
+   }
+
+
+plot_volcano(qlf.BICRA.top)
+ggsave("plots/BICRA_volcano.svg", width = 12, height = 10, units = "cm")
+
+
+plot_volcano(qlf.CHCHD10.top)
+ggsave("plots/CHCHD10_volcano.svg", width = 12, height = 10, units = "cm")
+
+
+plot_volcano(qlf.CNOT.top)
+ggsave("plots/CNOT3_volcano.svg", width = 12, height = 10, units = "cm")
+
+
+plot_volcano(qlf.CHCHD10.top, top_label = 10)
+ggsave("plots/CHCHD10_volcano_top_label_10.svg", width = 12, height = 10, units = "cm")
+
+plot_volcano(qlf.CNOT.top, top_label = 10)
+ggsave("plots/CNOT3_volcano_top_label_10.svg", width = 12, height = 10, units = "cm")
+
+
+```
+
+## Pathway analysis
+
+### Pairwise cluster profiler
+
+Setting page, creating folder
+```{r}
+par(mar = c(10, 5, 3, 0), mfcol = c(1, 1), cex = 0.8)
+par(mar = par()$mar + c(0, 0, 0, 10))
+
+PATH.CP="processed-data/pathway-analysis/"
+dir.create(PATH.CP)
+
+```
+
+I've removed p value threshold for this analysis
+
+```{r}
+colnames(eset)
+```
+
+#### Function for heatmap and pathway
+```{r}
+#plots <- list()
+make_pathway_analysis <- function(x, GENE, table){
+  #plots <- list()
+  hr <- hclust(as.dist(1 - cor(t(x),
+                               method = "pearson")),
+               method = "complete")
+  mycl <- as.vector(cutree(hr, h = max(hr$height)/1.3))
+  
+  plots <- list()
+  heatmap3(x,
+           labRow = NA,
+           xlab = "top 1000 genes based on p values",
+           cexRow = 0.9,
+           cexCol = 1,
+           Rowv = as.dendrogram(hr),
+           Colv = NA,
+           RowSideColors = col.pal.set[mycl],
+           RowSideLabs = "Cluster",
+           ColSideColors = col.pal.set[as.factor(colnames(x))],
+           margins = c(8, 10),
+           showRowDendro = T,
+           showColDendro = F,
+           balanceColor = F
+           )
+  
+  title("Differential expression")
+  
+  legend(x = 15, y = 1,
+         bty = "n",
+         lty = 1,
+         lwd = 8,
+         xpd = T,
+         cex = 0.8,
+         legend = c("Group",
+                    colnames(x),
+                    "",
+                    "Cluster No:",
+                    unique(mycl)),
+         col = c(0,
+                 col.pal.set[1:length(colnames(x))],
+                 0,
+                 0,
+                 col.pal.set[1:length(unique(mycl))]),
+         ncol = 1)
+
+  plots[[1]] <- recordPlot()
+  
+  heat.cluster <- data.frame(toptable[rownames(x),], Cluster = mycl)
+  heat.cluster <- heat.cluster[order(heat.cluster$Cluster),]
+  
+  write.xlsx(heat.cluster, file = paste("processed-data/cluster-DE-", GENE, ".xlsx", sep = ""))
+  
+  cluster.entrez.list <- list()
+  
+  for (i in 1:length(unique(mycl))){
+    ID <- heat.cluster$ENTREZID[heat.cluster$Cluster==i]
+    cluster.entrez.list <- c(cluster.entrez.list, list(ID))
+  }
+  names(cluster.entrez.list) = unique(mycl)
+  
+  cp.result <- list()
+  
+  # ReactomeDB
+  path <- compareCluster(geneCluster = cluster.entrez.list,
+                         universe = na.omit(Anno$ENTREZID),
+                         pvalueCutoff = 0.05,
+                         qvalueCutoff = 0.05,
+                         organism = "human",
+                         pAdjustMethod = "BH",
+                         fun = "enrichPathway",
+                         readable = T)
+  
+  if(exists("path")){
+    cp.result <- c(cp.result, list(path))
+    names(cp.result)[[length(cp.result)]] = "ReactomeDB"
+  }
+  
+  # KEGG
+  kegg <- compareCluster(geneCluster = cluster.entrez.list,
+                         universe = na.omit(Anno$ENTREZID),
+                         pvalueCutoff = 0.05,
+                         qvalueCutoff = 0.05,
+                         organism = "human",
+                         pAdjustMethod = "BH",
+                         fun = "enrichKEGG")
+  if(exists("kegg")){
+    cp.result <- c(cp.result, list(kegg))
+    names(cp.result)[[length(cp.result)]] = "KEGG"
+  }
+  
+  # GO
+  
+  go.bp <- compareCluster(geneCluster = cluster.entrez.list,
+                          OrgDb = "org.Hs.eg.db",
+                          readable = T,
+                          universe = na.omit(Anno$ENTREZID),
+                          pvalueCutoff = 0.05,
+                          qvalueCutoff = 0.05,
+                          ont = "BP",
+                          pAdjustMethod = "BH",
+                          fun = "enrichGO")
+  
+  if(exists("go.bp")){
+    cp.result <- c(cp.result, list(go.bp))
+    names(cp.result)[[length(cp.result)]] = "GO Biological Function"
+  }
+  
+  go.mf <- compareCluster(geneCluster = cluster.entrez.list,
+                          OrgDb = "org.Hs.eg.db",
+                          readable = T,
+                          universe = na.omit(Anno$ENTREZID),
+                          pvalueCutoff = 0.05,
+                          qvalueCutoff = 0.05,
+                          ont = "MF",
+                          pAdjustMethod = "BH",
+                          fun = "enrichGO")
+  
+  if(exists("go.mf")){
+    cp.result <- c(cp.result, list(go.mf))
+    names(cp.result)[[length(cp.result)]] = "GO Molecular Function"
+  }
+  
+  go.cc <- compareCluster(geneClusters = cluster.entrez.list,
+                          OrgDb = "org.Hs.eg.db",
+                          readable = T,
+                          universe = na.omit(Anno$ENTREZID),
+                          pvalueCutoff = 0.05,
+                          qvalueCutoff = 0.05,
+                          ont = "CC",
+                          pAdjustMethod = "BH",
+                          fun = "enrichGO")
+  
+  if(exists("go.cc")){
+    cp.result <- c(cp.result, list(go.cc))
+    names(cp.result)[[length(cp.result)]] = "GO Cellular Component"
+  }
+ 
+  # plot results
+  
+  for (i in 1:length(cp.result)) {
+    print(dotplot(cp.result[[i]], showCategory = 10, font.size = 8,
+                  title = paste("Enrichment Analysis (", names(cp.result)[i], ") FDR < 0.05", sep = "")))
+    plots[[i+1]] <- recordPlot()
+    write.xlsx(as.data.frame(cp.result[i]),
+               file = paste("processed-data/pathway-analysis/",GENE, names(cp.result)[i], ".xlsx", sep = "")
+               )
+  }
+  
+  pdf(paste("processed-data/pathway-analysis/", GENE, "-heatmap-and-enrichment.pdf", sep = ""),
+      paper = "a4r",
+      width = 11.49,
+      height = 8.07)
+
+  for (i in 1:length(plots)) {
+    replayPlot(plots[[i]])
+  }
+  return(plots)
+  #dev.off()
+}
+```
+
+#### BICRA
+```{r}
+GENE="BICRAtop1000"
+toptable=qlf.BICRA.top
+x <- cpm(eset, log = T)[as.character(rownames(toptable)), c(13:15, 1:3)]
+
+if (nrow(x) > 1000){
+  x <- x[1:1000, ]
+}
+
+
+BICRA_pathways <- make_pathway_analysis(x, GENE, toptable)
+
+```
+
+
+#### CHCHD10
+```{r}
+GENE="CHCHD10top1000"
+toptable=qlf.CHCHD10.top
+x <- cpm(eset, log = T)[as.character(rownames(toptable)), c(13:15, 7:9)]
+
+if (nrow(x) > 1000){
+  x <- x[1:1000, ]
+}
+
+
+CHCHD10_pathways <- make_pathway_analysis(x, GENE, toptable)
+
+```
+
+
+#### CNOT
+```{r}
+GENE="CNOTtop1000"
+toptable=qlf.CNOT.top
+x <- cpm(eset, log = T)[as.character(rownames(toptable)), c(13:15, 10:12)]
+
+if (nrow(x) > 1000){
+  x <- x[1:1000, ]
+}
+
+CNOT_pathways <- make_pathway_analysis(x, GENE, toptable)
+
+```
+
+#### CCAR
+```{r}
+GENE="CCARtop1000"
+toptable=qlf.CCAR.top
+x <- cpm(eset, log = T)[as.character(rownames(toptable)), c(13:15, 4:6)]
+
+if (nrow(x) > 1000){
+  x <- x[1:1000, ]
+}
+
+CCCAR_pathways <- make_pathway_analysis(x, GENE, toptable)
+
+```
+
+#### siSDCBP
+```{r}
+GENE="siSDCBPtop1000"
+toptable=qlf.siSDCBP.top
+x <- cpm(eset, log = T)[as.character(rownames(toptable)), c(16:18, 19:21)]
+
+if (nrow(x) > 1000){
+  x <- x[1:1000, ]
+}
+
+CCCAR_pathways <- make_pathway_analysis(x, GENE, toptable)
+
+```
+
+### 
+### BICRA up-regulated genes
+Results for genes up-regulated in BICRA are not really significant. I made
+p value and q value cutoffs = 1 
+
+```{r}
+# Get 'universe' list of genes (ENTREZ ID) for enrichment analysis
+entrez.background <- as.character(eset$genes$ENTREZID)
+
+entrez.up.BICRA <- filter(qlf.BICRA.top, logFC > 0.8)$ENTREZID
+
+egobp.BICRA.up <- clusterProfiler::enrichGO(
+  gene = entrez.up.BICRA,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 0.2,
+  qvalueCutoff = 0.2,
+  readable = T)
+
+head(egobp.BICRA.up, 15)
+```
+```{r}
+barplot(egobp.BICRA.up, showCategory = 15)
+```
+### BICRA down-regulated genes
+
+```{r}
+
+entrez.dn.BICRA <- filter(qlf.BICRA.top, logFC < -0.8)$ENTREZID
+
+egobp.BICRA.dn <- clusterProfiler::enrichGO(
+  gene = entrez.dn.BICRA,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 0.2,
+  qvalueCutoff = 0.2,
+  readable = T)
+
+head(egobp.BICRA.dn, 15)
+
+```
+
+
+
+```{r}
+barplot(egobp.BICRA.dn, showCategory = 10)
+```
+
+```{r}
+# Enrichment Map analysis
+
+# Take data frame from clusterProfiler result object
+egobp.BICRA.up.df <- egobp.BICRA.up@result
+
+# Create a new column term size from BgRatio
+egobp.BICRA.up.df$term.size <- gsub("/(\\d+)", "", egobp.BICRA.up.df$BgRatio)
+
+# Keep only term size >= 3 and gene count >= 5
+egobp.BICRA.up.df <- egobp.BICRA.up.df[which(egobp.BICRA.up.df[, "term.size"] >= 3 & egobp.BICRA.up.df[, "Count"] >= 5),]
+egobp.BICRA.up.df <- egobp.BICRA.up.df[c("ID", "Description", "pvalue", "qvalue", "geneID")]
+
+# Format gene list columns
+egobp.BICRA.up.df$geneID <- gsub("/", ",", egobp.BICRA.up.df$geneID)
+
+# Add column for phenotype
+egobp.BICRA.up.df <- cbind(egobp.BICRA.up.df, phenotype = 1)
+egobp.BICRA.up.df <- egobp.BICRA.up.df[, c(1:4, 6, 5)]
+
+# change column headers
+colnames(egobp.BICRA.up.df) <- c("Name", "Description", "pvalue", "qvalue", "phenotype", "genes")
+
+egobp.BICRA.up.filename <- file.path(getwd(), paste("clusterprofiler_cluster_enr_BICRAup_results.txt", sep = "_"))
+write.table(egobp.BICRA.up.df, egobp.BICRA.up.filename, col.names = T, sep = "\t", row.names = F, quote = F)
+
+em_command <- paste('enrichmentmap build analysisType="generic" ',
+                    'pvalue=', "0.05", 'qvalue=', "0.05",
+                    'similaritycutoff=', "0.25",
+                    'coefficients=', "JACCARD",
+                    'enrichmentsDataset1=', egobp.BICRA.up.filename,
+                    sep = " ")
+
+# This command above returns suid of newly created network
+em_network_suid <- commandsRun(em_command)
+
+renameNetwork("BICRAup_enrichmentmap_cp-1-jul-2022", network = as.numeric(em_network_suid))
+```
+
+```{r}
+
+entrez.up.siSDCBP <- filter(qlf.siSDCBP.top, logFC > 0.8)$ENTREZID
+
+egobp.siSDCBP.up <- clusterProfiler::enrichGO(
+  gene = entrez.up.siSDCBP,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.siSDCBP.up, 15)
+
+```
+
+```{r}
+barplot(egobp.siSDCBP.up, showCategory = 15)
+```
+
+### siSDCBP down-regulated genes
+
+```{r}
+
+entrez.dn.siSDCBP <- filter(qlf.siSDCBP.top, logFC < -0.8)$ENTREZID
+
+egobp.siSDCBP.dn <- clusterProfiler::enrichGO(
+  gene = entrez.dn.siSDCBP,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 0.2,
+  qvalueCutoff = 0.2,
+  readable = T)
+
+head(egobp.siSDCBP.dn, 15)
+
+```
+
+```{r}
+barplot(egobp.siSDCBP.dn, showCategory = 15)
+```
+
+```{r}
+# Enrichment Map analysis
+
+# Take data frame from clusterProfiler result object
+egobp.siSDCBP.dn.df <- egobp.siSDCBP.dn@result
+
+# Create a new column term size from BgRatio
+egobp.siSDCBP.dn.df$term.size <- gsub("/(\\d+)", "", egobp.siSDCBP.dn.df$BgRatio)
+
+# Keep only term size >= 3 and gene count >= 5
+egobp.siSDCBP.dn.df <- egobp.siSDCBP.dn.df[which(egobp.siSDCBP.dn.df[, "term.size"] >= 3 & egobp.siSDCBP.dn.df[, "Count"] >= 5),]
+egobp.siSDCBP.dn.df <- egobp.siSDCBP.dn.df[c("ID", "Description", "pvalue", "qvalue", "geneID")]
+
+# Format gene list columns
+egobp.siSDCBP.dn.df$geneID <- gsub("/", ",", egobp.siSDCBP.dn.df$geneID)
+
+# Add column for phenotype
+egobp.siSDCBP.dn.df <- cbind(egobp.siSDCBP.dn.df, phenotype = 1)
+egobp.siSDCBP.dn.df <- egobp.siSDCBP.dn.df[, c(1:4, 6, 5)]
+
+# change column headers
+colnames(egobp.siSDCBP.dn.df) <- c("Name", "Description", "pvalue", "qvalue", "phenotype", "genes")
+
+egobp.siSDCBP.dn.filename <- file.path(getwd(), paste("clusterprofiler_cluster_enr_siSDCBPdown_results.txt", sep = "_"))
+write.table(egobp.siSDCBP.dn.df, egobp.siSDCBP.dn.filename, col.names = T, sep = "\t", row.names = F, quote = F)
+
+em_command <- paste('enrichmentmap build analysisType="generic" ',
+                    'pvalue=', "0.05", 'qvalue=', "0.05",
+                    'similaritycutoff=', "0.25",
+                    'coefficients=', "JACCARD",
+                    'enrichmentsDataset1=', egobp.siSDCBP.dn.filename,
+                    sep = " ")
+
+# This command above returns suid of newly created network
+em_network_suid <- commandsRun(em_command)
+
+renameNetwork("siSDCBPdown_enrichmentmap_cp-1-july-2022", network = as.numeric(em_network_suid))
+```
+
+### CNOT up-regulated genes
+
+```{r}
+entrez.up.CNOT <- filter(qlf.CNOT.top, logFC > 0.8)$ENTREZID
+
+egobp.CNOT.up <- clusterProfiler::enrichGO(
+  gene = entrez.up.CNOT,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.CNOT.up, 15)
+```
+
+```{r}
+barplot(egobp.CNOT.up, showCategory = 15)
+```
+### CNOT down-regulated genes
+
+```{r}
+entrez.dn.CNOT <- filter(qlf.CNOT.top, logFC < -0.8)$ENTREZID
+
+egobp.CNOT.dn <- clusterProfiler::enrichGO(
+  gene = entrez.dn.CNOT,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2,
+  readable = T)
+
+head(egobp.CNOT.dn, 10)
+```
+
+```{r}
+barplot(egobp.CNOT.dn, showCategory = 10)
+```
+
+```{r}
+# Enrichment Map analysis
+
+# Take data frame from clusterProfiler result object
+egobp.CNOT.dn.df <- egobp.CNOT.dn@result
+
+# Create a new column term size from BgRatio
+egobp.CNOT.dn.df$term.size <- gsub("/(\\d+)", "", egobp.CNOT.dn.df$BgRatio)
+
+# Keep only term size >= 3 and gene count >= 5
+egobp.CNOT.dn.df <- egobp.CNOT.dn.df[which(egobp.CNOT.dn.df[, "term.size"] >= 3 & egobp.CNOT.dn.df[, "Count"] >= 5),]
+egobp.CNOT.dn.df <- egobp.CNOT.dn.df[c("ID", "Description", "pvalue", "qvalue", "geneID")]
+
+# Format gene list columns
+egobp.CNOT.dn.df$geneID <- gsub("/", ",", egobp.CNOT.dn.df$geneID)
+
+# Add column for phenotype
+egobp.CNOT.dn.df <- cbind(egobp.CNOT.dn.df, phenotype = 1)
+egobp.CNOT.dn.df <- egobp.CNOT.dn.df[, c(1:4, 6, 5)]
+
+# change column headers
+colnames(egobp.CNOT.dn.df) <- c("Name", "Description", "pvalue", "qvalue", "phenotype", "genes")
+
+egobp.CNOT.dn.filename <- file.path(getwd(), paste("clusterprofiler_cluster_enr_CNOTdown_results.txt", sep = "_"))
+write.table(egobp.CNOT.dn.df, egobp.CNOT.dn.filename, col.names = T, sep = "\t", row.names = F, quote = F)
+
+em_command <- paste('enrichmentmap build analysisType="generic" ',
+                    'pvalue=', "0.05", 'qvalue=', "0.05",
+                    'similaritycutoff=', "0.25",
+                    'coefficients=', "JACCARD",
+                    'enrichmentsDataset1=', egobp.CNOT.dn.filename,
+                    sep = " ")
+
+# This command above returns suid of newly created network
+em_network_suid <- commandsRun(em_command)
+
+renameNetwork("CNOTdown_enrichmentmap_cp", network = as.numeric(em_network_suid))
+```
+
+### CHCHD10 up-regulated genes
+
+```{r}
+entrez.up.CHCHD10 <- filter(qlf.CHCHD10.top, logFC > 0.8)$ENTREZID
+
+egobp.CHCHD10.up <- clusterProfiler::enrichGO(
+  gene = entrez.up.CHCHD10,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.CHCHD10.up, 10)
+```
+
+```{r}
+barplot(egobp.CHCHD10.up, showCategory = 10)
+```
+```{r}
+dotplot(egobp.CHCHD10.up, showCategory = 20)
+```
+```{r}
+goplot(egobp.CHCHD10.up)
+```
+
+```{r}
+ggplot(egobp.CHCHD10.up, aes(x = reorder(Description, -pvalue), y = Count, fill = -p.adjust)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_continuous(low = "blue", high = "red") +
+  labs(x = "", y = "", fill = "p.adjust") +
+  theme(axis.text = element_text(size = 11))
+```
+
+
+### CHCHD10 down-regulated genes
+
+```{r}
+entrez.dn.CHCHD10 <- filter(qlf.CHCHD10.top, logFC < -0.8)$ENTREZID
+
+egobp.CHCHD10.dn <- clusterProfiler::enrichGO(
+  gene = entrez.dn.CHCHD10,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.CHCHD10.dn, 10)
+```
+
+```{r}
+barplot(egobp.CHCHD10.dn, showCategory = 10)
+```
+
+```{r}
+# Enrichment Map analysis
+
+# Take data frame from clusterProfiler result object
+egobp.CHCHD10.dn.df <- egobp.CHCHD10.dn@result
+
+# Create a new column term size from BgRatio
+egobp.CHCHD10.dn.df$term.size <- gsub("/(\\d+)", "", egobp.CHCHD10.dn.df$BgRatio)
+
+# Keep only term size >= 3 and gene count >= 5
+egobp.CHCHD10.dn.df <- egobp.CHCHD10.dn.df[which(egobp.CHCHD10.dn.df[, "term.size"] >= 3 & egobp.CHCHD10.dn.df[, "Count"] >= 5),]
+egobp.CHCHD10.dn.df <- egobp.CHCHD10.dn.df[c("ID", "Description", "pvalue", "qvalue", "geneID")]
+
+# Format gene list columns
+egobp.CHCHD10.dn.df$geneID <- gsub("/", ",", egobp.CHCHD10.dn.df$geneID)
+
+# Add column for phenotype
+egobp.CHCHD10.dn.df <- cbind(egobp.CHCHD10.dn.df, phenotype = 1)
+egobp.CHCHD10.dn.df <- egobp.CHCHD10.dn.df[, c(1:4, 6, 5)]
+
+# change column headers
+colnames(egobp.CHCHD10.dn.df) <- c("Name", "Description", "pvalue", "qvalue", "phenotype", "genes")
+
+egobp.CHCHD10.dn.filename <- file.path(getwd(), paste("clusterprofiler_cluster_enr_CHCHD10down_results.txt", sep = "_"))
+write.table(egobp.CHCHD10.dn.df, egobp.CHCHD10.dn.filename, col.names = T, sep = "\t", row.names = F, quote = F)
+
+em_command <- paste('enrichmentmap build analysisType="generic" ',
+                    'pvalue=', "0.05", 'qvalue=', "0.05",
+                    'similaritycutoff=', "0.25",
+                    'coefficients=', "JACCARD",
+                    'enrichmentsDataset1=', egobp.CHCHD10.dn.filename,
+                    sep = " ")
+
+# This command above returns suid of newly created network
+em_network_suid <- commandsRun(em_command)
+
+renameNetwork("CHCHD10down_enrichmentmap_cp", network = as.numeric(em_network_suid))
+```
+
+### CCAR up-regulated genes
+Here it's strange. Only CHCHD10 gene enriched
+
+
+```{r}
+entrez.up.CCAR <- filter(qlf.CCAR.top, logFC > 0.8)$ENTREZID
+
+egobp.CCAR.up <- clusterProfiler::enrichGO(
+  gene = entrez.up.CCAR,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.CCAR.up, 10)
+```
+
+```{r}
+barplot(egobp.CCAR.up, showCategory = 10)
+```
+
+```{r}
+# # Enrichment Map analysis
+# 
+# # Take data frame from clusterProfiler result object
+# egobp.CCAR.up.df <- egobp.CCAR.up@result
+# 
+# # Create a new column term size from BgRatio
+# egobp.CCAR.up.df$term.size <- gsub("/(\\d+)", "", egobp.CCAR.up.df$BgRatio)
+# 
+# # Keep only term size >= 3 and gene count >= 5
+# egobp.CCAR.up.df <- egobp.CCAR.up.df[which(egobp.CCAR.up.df[, "term.size"] >= 3 & egobp.CCAR.up.df[, "Count"] >= 5),]
+# egobp.CCAR.up.df <- egobp.CCAR.up.df[c("ID", "Description", "pvalue", "qvalue", "geneID")]
+# 
+# # Format gene list columns
+# egobp.CCAR.up.df$geneID <- gsub("/", ",", egobp.CCAR.up.df$geneID)
+# 
+# # Add column for phenotype
+# egobp.CCAR.up.df <- cbind(egobp.CCAR.up.df, phenotype = 1)
+# egobp.CCAR.up.df <- egobp.CCAR.up.df[, c(1:4, 6, 5)]
+# 
+# # change column headers
+# colnames(egobp.CCAR.up.df) <- c("Name", "Description", "pvalue", "qvalue", "phenotype", "genes")
+# 
+# egobp.CCAR.up.filename <- file.path(getwd(), paste("clusterprofiler_cluster_enr_CCARup_results.txt", sep = "_"))
+# write.table(egobp.CCAR.up.df, egobp.CCAR.up.filename, col.names = T, sep = "\t", row.names = F, quote = F)
+# 
+# em_command <- paste('enrichmentmap build analysisType="generic" ',
+#                     'pvalue=', "0.05", 'qvalue=', "0.05",
+#                     'similaritycutoff=', "0.25",
+#                     'coefficients=', "JACCARD",
+#                     'enrichmentsDataset1=', egobp.CCAR.up.filename,
+#                     sep = " ")
+# 
+# # This command above returns suid of newly created network
+# em_network_suid <- commandsRun(em_command)
+# 
+# renameNetwork("CCARup_enrichmentmap_cp", network = as.numeric(em_network_suid))
+
+#Counts are too low here
+```
+
+### CCAR down-regulated genes
+Also one gene SLIT1
+```{r}
+entrez.dn.CCAR <- filter(qlf.CCAR.top, logFC < -0.8)$ENTREZID
+
+egobp.CCAR.dn <- clusterProfiler::enrichGO(
+  gene = entrez.dn.CCAR,
+  universe = entrez.background,
+  OrgDb = org.Hs.eg.db,
+  ont = "BP",
+  pAdjustMethod = "fdr",
+  pvalueCutoff = 1,
+  qvalueCutoff = 1,
+  readable = T)
+
+head(egobp.CCAR.dn, 10)
+```
+
+```{r}
+barplot(egobp.CCAR.dn, showCategory = 10)
+```
+
+
+NRIR expression in siSDCBP
+```{r}
+qlf.siSDCBP.top[qlf.siSDCBP.top$SYMBOL == "NRIR",c("SYMBOL", "logFC", "PValue", "logCPM")]
+```
+
+
+# Some gene search
+Searching for some genes which are weirdly absent
+```{r}
+absent_gene_counts_df <- data.frame("TREX1" = counts$counts[rownames(counts$counts) == "ENSG00000213689"],
+                                    "KCNQ2" = counts$counts[rownames(counts$counts) == "ENSG00000075043"],
+                                    "BICRA" = counts$counts[rownames(counts$counts) == "ENSG00000063169"])
+rownames(absent_gene_counts_df) <- colnames(counts$counts)
+absent_gene_counts_df <- as.data.frame(t(absent_gene_counts_df))
+absent_gene_counts_df$ESNSEMBL <- c("ENSG00000213689", "ENSG00000075043", "ENSG00000063169")
+absent_gene_counts_df <- absent_gene_counts_df[,c(22, 1:21)]
+
+absent_gene_counts_df
+write.xlsx(absent_gene_counts_df, "absent_gene_counts_df.xlsx", row.names = TRUE)
+```
+
